@@ -13,19 +13,19 @@ Execution checklist derived from `spec.md` and `design.md`. Tasks are grouped in
 ## Phase 0 — Project Foundations
 
 - [ ] **T0.1** Initialize repo structure
-  - Deliverable: `backend/`, `frontend/`, `docs/`, `infra/`, `tests/` directories; `.specify/` containing `spec.md`, `design.md`, `tasks.md`, `constitution.md`.
+  - Deliverable: `backend/`, `bot/`, `docs/`, `infra/`, `tests/` directories; `.specify/` containing `spec.md`, `design.md`, `tasks.md`, `constitution.md`.
   - Accept: `tree -L 2` shows the structure; specs committed.
 
 - [ ] **T0.2** Write `constitution.md`
-  - Deliverable: rules covering source-grounding, citation requirements, refusal-as-first-class, no cross-document retrieval, dyslexia-friendly defaults.
+  - Deliverable: rules covering source-grounding, citation requirements, refusal-as-first-class, no cross-document retrieval, document-scoped answers only.
   - Accept: present in `.specify/` and reviewed.
 
 - [ ] **T0.3** Choose stack defaults & lock versions
-  - Deliverable: `pyproject.toml`, `package.json`, `docker-compose.yml` skeletons.
+  - Deliverable: `pyproject.toml`, `docker-compose.yml` skeletons; `discord.py` v2 and `openai` SDK pinned.
   - Accept: `docker compose up` brings up empty Postgres + Redis containers cleanly.
 
 - [ ] **T0.4** CI scaffolding
-  - Deliverable: GitHub Actions (or equivalent) running lint + test on push.
+  - Deliverable: GitHub Actions running lint + test on push.
   - Accept: empty test suite passes on PR.
 
 ---
@@ -35,31 +35,27 @@ Execution checklist derived from `spec.md` and `design.md`. Tasks are grouped in
 Goal: an uploaded PDF becomes a chapter-segmented, embedded, retrievable corpus.
 
 - [ ] **T1.1** Define core data models
-  - Deliverable: SQLAlchemy models for `Document`, `Chapter`, `Chunk`; Alembic migration.
+  - Deliverable: SQLAlchemy models for `Document` (incl. `discord_user_id`), `Chapter`, `Chunk`; Alembic migration.
   - Accept: `alembic upgrade head` succeeds; FK relationships verified.
 
 - [ ] **T1.2** PDF parser
   - Deliverable: function `parse_pdf(file) -> Block[]` returning text with `{page, char_start, char_end}`.
   - Accept: unit test on a 3-page sample PDF returns blocks with non-overlapping character spans and correct page numbers.
 
-- [ ] **T1.3** EPUB parser ⚡ parallel-safe
-  - Deliverable: `parse_epub(file) -> Block[]`.
-  - Accept: unit test on a sample EPUB returns ordered blocks with chapter hints preserved.
+- [ ] **T1.3** Chapter segmenter
+  - Deliverable: `segment_chapters(blocks) -> Chapter[]` using TOC detection, font-size jumps, and numbered heading heuristics; LLM fallback for unstructured docs.
+  - Accept: on three test PDFs (well-structured, scanned-style, minimal formatting), segmentation matches expected chapter list within ±1 chapter.
 
-- [ ] **T1.4** Chapter segmenter
-  - Deliverable: `segment_chapters(blocks) -> Chapter[]` with heuristics + LLM fallback.
-  - Accept: on three test documents (well-structured PDF, scanned-style PDF, EPUB), segmentation matches expected chapter list within ±1 chapter.
-
-- [ ] **T1.5** Chunker
+- [ ] **T1.4** Chunker
   - Deliverable: ~800-token recursive splitter with 150-token overlap; preserves citation metadata.
   - Accept: every chunk's `char_start/char_end` resolves back to the original text exactly.
 
-- [ ] **T1.6** Embedding + vector store integration
-  - Deliverable: pgvector setup; `embed_and_index(chunks)` function with batching and caching.
-  - Accept: vector search by cosine similarity returns expected top-1 chunk for a known query.
+- [ ] **T1.5** Embedding + vector store integration
+  - Deliverable: pgvector setup; `embed_and_index(chunks)` using OpenAI `text-embedding-3-small` with batching and hash-based caching.
+  - Accept: vector search by cosine similarity returns expected top-1 chunk for a known query; re-upload of same file hash skips re-embedding.
 
-- [ ] **T1.7** Ingestion job orchestration
-  - Deliverable: Redis-backed worker that runs the full parse → segment → chunk → embed pipeline; idempotent on document hash.
+- [ ] **T1.6** Ingestion job orchestration
+  - Deliverable: Redis-backed worker running the full parse → segment → chunk → embed pipeline; idempotent on document hash; notifies Discord user on completion.
   - Accept: uploading a 300-page PDF completes end-to-end in under 60 seconds on dev hardware (spec **A1**).
 
 ---
@@ -67,12 +63,12 @@ Goal: an uploaded PDF becomes a chapter-segmented, embedded, retrievable corpus.
 ## Phase 2 — Retrieval & Generation Core 🔒
 
 - [ ] **T2.1** Hybrid retriever
-  - Deliverable: `retrieve(document_id, query, scope, k) -> Chunk[]` combining dense + BM25 with RRF.
+  - Deliverable: `retrieve(document_id, query, scope, k) -> Chunk[]` combining dense + BM25 with reciprocal rank fusion.
   - Accept: on 10 hand-labeled queries, top-3 contains the gold chunk for ≥9 of them.
 
 - [ ] **T2.2** LLM provider interface
-  - Deliverable: abstract `Provider` with concrete `AnthropicProvider`; structured-output JSON mode.
-  - Accept: integration test calls Claude and parses JSON response.
+  - Deliverable: abstract `Provider` with concrete `OpenAIProvider` (GPT-4o); structured-output JSON mode.
+  - Accept: integration test calls GPT-4o and parses JSON response with citations.
 
 - [ ] **T2.3** Citation validator 🔒
   - Deliverable: `validate_citations(output, chunks)` enforcing presence + lexical overlap; returns pass/fail + reason.
@@ -83,7 +79,7 @@ Goal: an uploaded PDF becomes a chapter-segmented, embedded, retrievable corpus.
   - Accept: summaries on 5 test chapters validate cleanly and stay within length bounds.
 
 - [ ] **T2.5** Quiz generator
-  - Deliverable: `generate_quiz(chapter)` producing 5–10 questions with answers, distractors, explanations, citations.
+  - Deliverable: `generate_quiz(chapter)` producing 5–10 MCQ questions with answers, distractors, explanations, citations.
   - Accept: every question's citation passes the validator; explanations reference the cited span.
 
 - [ ] **T2.6** Q&A answerer
@@ -91,7 +87,7 @@ Goal: an uploaded PDF becomes a chapter-segmented, embedded, retrievable corpus.
   - Accept: on the adversarial test set (≥20 out-of-document questions), refusal rate is **100%** (spec **A3**).
 
 - [ ] **T2.7** Simplifier
-  - Deliverable: `simplify(passage)` reducing reading level while preserving claims.
+  - Deliverable: `simplify(passage)` reducing reading level while preserving factual claims.
   - Accept: Flesch-Kincaid grade level drops ≥4 grades on 10 test passages; cited claims unchanged (spec **A5**).
 
 - [ ] **T2.8** Glossary generator
@@ -102,24 +98,24 @@ Goal: an uploaded PDF becomes a chapter-segmented, embedded, retrievable corpus.
 
 ## Phase 3 — SRS Scheduler
 
-- [ ] **T3.1** FSRS implementation
-  - Deliverable: `FSRSScheduler` class with `update(item, rating) -> new_state` and `due_items(user) -> Item[]`.
-  - Accept: parity tests against reference FSRS implementation on 50 sample review sequences.
+- [ ] **T3.1** SM-2 implementation
+  - Deliverable: `SM2Scheduler` class with `update(item, rating: int) -> new_state` (rating 0–5; ratings < 3 reset interval) and `due_items(discord_user_id) -> Item[]`.
+  - Accept: unit tests verify interval progression and ease-factor updates against the SM-2 specification on 20 sample review sequences.
 
 - [ ] **T3.2** Persist quiz history
-  - Deliverable: `QuizItem` and `Review` models with FSRS state fields; migration.
-  - Accept: rating an item updates `next_review` and `stability` correctly.
+  - Deliverable: `QuizItem` and `Review` models with SM-2 state fields (`ease_factor`, `interval`, `repetitions`, `next_review`, `last_reviewed`); Alembic migration.
+  - Accept: rating an item updates `next_review` and `ease_factor` correctly; raw `Review` row is appended.
 
 - [ ] **T3.3** Daily session endpoint
-  - Deliverable: `GET /sessions/today` returning due items across all documents (spec **A4**).
-  - Accept: items due today appear; items due tomorrow do not.
+  - Deliverable: `GET /sessions/today` returning due items across all of a user's documents (spec **A4**).
+  - Accept: items where `next_review <= now()` appear; items due tomorrow do not.
 
 ---
 
 ## Phase 4 — Application API
 
 - [ ] **T4.1** Documents endpoints
-  - Deliverable: `POST /documents`, `GET /documents/:id`, list endpoint.
+  - Deliverable: `POST /documents`, `GET /documents/:id`, list endpoint scoped to `discord_user_id`.
   - Accept: upload → poll → `status: ready` flow works end-to-end.
 
 - [ ] **T4.2** Summary endpoint with caching
@@ -127,8 +123,8 @@ Goal: an uploaded PDF becomes a chapter-segmented, embedded, retrievable corpus.
   - Accept: second call latency <200ms.
 
 - [ ] **T4.3** Quiz endpoints
-  - Deliverable: `POST` to generate/fetch, `POST /quiz-items/:id/review` for ratings.
-  - Accept: full quiz lifecycle works; reviews persist and update FSRS.
+  - Deliverable: `POST` to generate/fetch quiz, `POST /quiz-items/:id/review` for SM-2 ratings.
+  - Accept: full quiz lifecycle works; reviews persist and correctly update SM-2 state.
 
 - [ ] **T4.4** Q&A endpoint
   - Deliverable: `POST /documents/:id/qa` with session continuity.
@@ -139,40 +135,48 @@ Goal: an uploaded PDF becomes a chapter-segmented, embedded, retrievable corpus.
   - Accept: both return validated, cited output.
 
 - [ ] **T4.6** Dashboard endpoint
-  - Deliverable: `GET /dashboard` with retention scores, session count, per-document progress.
+  - Deliverable: `GET /dashboard` with retention scores, session count, per-document progress scoped to `discord_user_id`.
   - Accept: response time <2s on a corpus of 10 documents (spec **A6**).
 
 ---
 
-## Phase 5 — Frontend
+## Phase 5 — Discord Bot
 
-- [ ] **T5.1** Reader shell
-  - Deliverable: two-pane layout, document loader, chapter navigation.
-  - Accept: opening a chapter shows its text without layout shift.
+- [ ] **T5.1** Bot scaffolding
+  - Deliverable: `discord.py` v2 app with slash command registration, bot token config, and health-check startup log.
+  - Accept: bot comes online, slash commands appear in a test server, and `bot.is_ready()` is true.
 
-- [ ] **T5.2** Dyslexia-friendly defaults
-  - Deliverable: font picker (incl. OpenDyslexic), line-spacing slider, theme toggle, max-line-width control.
-  - Accept: defaults meet spec **A7**; settings persist across reloads.
+- [ ] **T5.2** `/upload` command
+  - Deliverable: accepts a PDF attachment, forwards file to `POST /documents`, replies with an ingestion-progress message, edits it to a success embed on `document.ready`.
+  - Accept: uploading a real PDF produces a "ready" confirmation in Discord; duplicate upload is a no-op with a user-friendly message.
 
-- [ ] **T5.3** Summary drawer
-  - Deliverable: pre-chapter summary appears on chapter open; citation markers tap-through to source.
-  - Accept: clicking a citation scrolls and highlights the cited span.
+- [ ] **T5.3** Active-document state
+  - Deliverable: per-user in-memory (or Redis) store of `active_document_id`; commands default to it when no document argument is supplied.
+  - Accept: after `/upload`, subsequent commands work without specifying the document; user can override with an explicit argument.
 
-- [ ] **T5.4** Quiz drawer
-  - Deliverable: end-of-chapter quiz UI with rating buttons (Again/Hard/Good/Easy), explanations on miss.
-  - Accept: quiz state persists if user navigates away and returns.
+- [ ] **T5.4** `/read` command
+  - Deliverable: posts chapter summary as a Discord embed; offers a **Next Chapter** button to advance.
+  - Accept: summary text and page citation render correctly in the embed; button advances chapter ordinal.
 
-- [ ] **T5.5** Q&A drawer
-  - Deliverable: free-form question input with streaming answer + citation chips; doesn't disrupt reading position.
-  - Accept: scroll position preserved when drawer opens/closes.
+- [ ] **T5.5** `/quiz` command + MCQ interactions ⚡ parallel-safe
+  - Deliverable: sends questions one at a time as embeds with A/B/C/D button components; after answer, disables buttons and appends explanation + citation blockquote.
+  - Accept: correct answer highlights correctly; wrong answer shows explanation; quiz state survives a bot restart (persisted via `Quiz`/`QuizItem` models).
 
-- [ ] **T5.6** Glossary panel
-  - Deliverable: searchable term list with follow-up question affordance per term.
-  - Accept: tapping a term in the reader opens the glossary entry.
+- [ ] **T5.6** `/review` command ⚡ parallel-safe
+  - Deliverable: fetches SM-2 due items via `GET /sessions/today` and runs the same MCQ button flow as `/quiz`.
+  - Accept: only items with `next_review <= now()` appear; SM-2 state updates after each rating.
 
-- [ ] **T5.7** Dashboard view
-  - Deliverable: retention chart, session calendar, per-document progress bars.
-  - Accept: matches the API contract from T4.6 and renders within 2s.
+- [ ] **T5.7** `/ask` command
+  - Deliverable: takes a free-form question string, calls `POST /documents/:id/qa`, posts answer embed with citation blockquotes; spills to a thread if over Discord's 4096-char embed limit.
+  - Accept: out-of-document questions receive the "not in document" message; answers include page citations.
+
+- [ ] **T5.8** `/simplify`, `/glossary`, `/dashboard` commands ⚡ parallel-safe
+  - Deliverable: `/simplify` accepts a quoted passage; `/glossary` accepts a term; `/dashboard` posts a retention embed.
+  - Accept: all three commands return cited, validated output matching the API contract from T4.5–T4.6.
+
+- [ ] **T5.9** Rate-limit queue
+  - Deliverable: outbound Discord message queue that respects per-channel and global rate limits; backs off on 429 responses.
+  - Accept: a quiz flow with 10 rapid answers does not produce a Discord API error.
 
 ---
 
@@ -186,7 +190,7 @@ This phase gates v1 release. No skipping.
 
 - [ ] **T6.2** CI hallucination gate
   - Deliverable: CI job that runs the corpus and fails the build on any non-refusal.
-  - Accept: gate is wired into the default branch protection.
+  - Accept: gate is wired into default branch protection.
 
 - [ ] **T6.3** Citation-verification audit
   - Deliverable: sampling job that re-validates 1% of generated citations daily in production.
@@ -198,9 +202,9 @@ This phase gates v1 release. No skipping.
 
 - [ ] **T7.1** Observability: structured logs, request tracing, LLM call metering.
 - [ ] **T7.2** Cost dashboard: per-document token spend, embedding spend.
-- [ ] **T7.3** Local-first deployment doc: Docker Compose quickstart.
+- [ ] **T7.3** Local-first deployment doc: Docker Compose quickstart with bot token setup.
 - [ ] **T7.4** Backup/restore for user data (quiz history especially).
-- [ ] **T7.5** Onboarding flow: upload → first chapter summary in under 90 seconds.
+- [ ] **T7.5** Onboarding flow: upload → first chapter summary in Discord in under 90 seconds.
 
 ---
 
@@ -209,7 +213,7 @@ This phase gates v1 release. No skipping.
 All must be true before tagging v1:
 
 - [ ] All Phase 1–6 tasks checked off.
-- [ ] Spec criteria **A1–A7** verified by automated tests.
+- [ ] Spec criteria **A1–A6** verified by automated tests.
 - [ ] Adversarial hallucination corpus: 100% refusal rate.
-- [ ] Manual UX pass on three real documents (an AI book chapter, a research paper, a vendor whitepaper).
+- [ ] Manual UX pass on three real documents (an AI book chapter, a research paper, a vendor whitepaper) via Discord.
 - [ ] `constitution.md` rules audited against shipped behavior.
