@@ -69,7 +69,6 @@ The system is considered to meet spec when:
 - **A4.** Quiz history persists across sessions and the SRS scheduler correctly surfaces items whose review interval has elapsed.
 - **A5.** The simplifier reduces Flesch-Kincaid grade level by at least 4 grades on selected passages while preserving factual claims (verified by spot-check of citations).
 - **A6.** The dashboard renders retention scores, session count, and document progress within 2 seconds.
-- **A7.** Reading layout meets dyslexia-friendly defaults: adjustable font (OpenDyslexic available), line spacing ≥1.5, max line length ≤80 characters, light/dark/sepia themes.
 
 ## 9. Constraints
 
@@ -78,13 +77,13 @@ The system is considered to meet spec when:
 - **Cost-aware.** Embedding and generation calls must be batched and cached; re-opening a document must not re-embed it.
 - **Privacy.** Uploaded documents are not used to train any model and are not shared with third parties beyond the chosen LLM provider's standard inference path.
 
-## 10. Open Questions
+## 10. Decisions (formerly Open Questions)
 
-- Which LLM provider(s) and embedding model(s) are in scope for v1?
-- Is offline-only mode (local LLM via Ollama, etc.) a v1 requirement or a stretch goal?
-- Does v1 ship as a web app, desktop app (Electron/Tauri), or both?
-- What's the SRS algorithm — vanilla SM-2, FSRS, or a custom variant?
-- File-format scope for v1: PDF only, or PDF + EPUB + Markdown?
+- **LLM provider:** OpenAI GPT-4o for generation and embeddings (v1).
+- **Offline mode:** Stretch goal / v2 — v1 requires internet connectivity.
+- **Platform:** Discord bot (v1). The reading companion is delivered as a Discord bot; PDF files are uploaded directly in Discord and all interaction happens in-channel or via DMs.
+- **SRS algorithm:** Vanilla SM-2.
+- **File-format scope:** PDF only for v1.
 
 ## 11. Success Metrics
 
