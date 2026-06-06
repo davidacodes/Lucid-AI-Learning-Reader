@@ -62,18 +62,20 @@ Re-uploading the same document hash is a no-op.
 
 **Job:** Call the LLM with strict source-grounding.
 
-Three patterns, each with a fixed prompt template:
+Each pattern is implemented as a **Pydantic AI agent** with a typed output model. Pydantic AI handles provider abstraction (OpenAI GPT-4o), structured output enforcement, and automatic retry on validation failure.
 
-- **Summarizer** (`generate_chapter_summary`): input = chapter chunks, output = 150–250 word plain-English summary with inline citations.
-- **Quizzer** (`generate_quiz`): input = chapter chunks, output = 5–10 questions, each with answer, distractors (for MCQ), explanation, and citation span.
-- **Answerer** (`answer_question`): input = retrieved chunks + user question, output = answer with citations OR explicit "not in document" refusal.
+Three agents, each with a fixed system prompt and a Pydantic output model:
+
+- **Summarizer** (`generate_chapter_summary`): output model `SummaryOutput(body: str, citations: list[Citation])` — 150–250 word plain-English summary.
+- **Quizzer** (`generate_quiz`): output model `QuizOutput(questions: list[QuizQuestion])` — 5–10 MCQ questions each with answer, distractors, explanation, and citation.
+- **Answerer** (`answer_question`): output model `AnswerOutput | Refusal` — answer with citations, or a typed `Refusal` when the answer isn't in the document.
 
 **Hallucination prevention — multi-layer:**
 
-1. **Prompt-level.** System prompt instructs the model to answer only from `<source>` blocks and to emit a fixed `NOT_IN_DOCUMENT` token when the answer isn't there.
-2. **Citation enforcement.** Every output requires a citation pointing to a real chunk ID. Outputs without citations are rejected at the validator.
-3. **Citation verification.** Validator checks that the cited span actually contains substring evidence for the claim (lexical overlap threshold + optional NLI check).
-4. **Refusal pass-through.** If the model emits `NOT_IN_DOCUMENT`, the bot surfaces a clear "this isn't in the document" Discord message — no fallback to general knowledge.
+1. **Prompt-level.** System prompt instructs the model to answer only from `<source>` blocks and to produce a `Refusal` when grounding is absent.
+2. **Schema enforcement.** Pydantic AI rejects any response missing a `citations` field and automatically retries once (`retries=1`) before surfacing a failure.
+3. **Citation verification.** After Pydantic AI returns a valid-shaped response, a custom validator checks that each cited chunk ID exists and that the claim has ≥0.6 token-overlap with the cited text. Failures after retry → `Refusal`.
+4. **Refusal pass-through.** A `Refusal` result surfaces as a clear "this isn't in the document" Discord message — no fallback to general knowledge.
 
 ### 2.4 SRS Scheduler
 
@@ -161,8 +163,8 @@ This is the load-bearing guarantee of the product, so it gets its own section.
 - **Backend:** Python 3.12, FastAPI, Postgres, pgvector (or Qdrant), Redis for job queue.
 - **Discord bot:** `discord.py` (v2) with slash command and component support.
 - **Ingestion:** `pdfplumber`, `tiktoken`, custom chapter segmenter.
-- **LLM:** OpenAI GPT-4o for generation; `text-embedding-3-small` for embeddings.
-- **Embeddings:** Cached aggressively; re-upload of the same file hash skips re-embedding.
+- **LLM:** `pydantic-ai` (agent framework) over OpenAI GPT-4o; typed output models enforce citation schema and handle retries.
+- **Embeddings:** OpenAI `text-embedding-3-small`; cached aggressively — same file hash skips re-embedding.
 - **Auth:** Single Discord user ID scoped per deployment; no login flow required.
 - **Deployment:** Docker Compose for local; single-host target for self-hosting.
 

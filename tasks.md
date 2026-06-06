@@ -21,7 +21,7 @@ Execution checklist derived from `spec.md` and `design.md`. Tasks are grouped in
   - Accept: present in `.specify/` and reviewed.
 
 - [ ] **T0.3** Choose stack defaults & lock versions
-  - Deliverable: `pyproject.toml`, `docker-compose.yml` skeletons; `discord.py` v2 and `openai` SDK pinned.
+  - Deliverable: `pyproject.toml`, `docker-compose.yml` skeletons; `discord.py` v2, `openai` SDK, and `pydantic-ai` pinned.
   - Accept: `docker compose up` brings up empty Postgres + Redis containers cleanly.
 
 - [ ] **T0.4** CI scaffolding
@@ -66,24 +66,24 @@ Goal: an uploaded PDF becomes a chapter-segmented, embedded, retrievable corpus.
   - Deliverable: `retrieve(document_id, query, scope, k) -> Chunk[]` combining dense + BM25 with reciprocal rank fusion.
   - Accept: on 10 hand-labeled queries, top-3 contains the gold chunk for ≥9 of them.
 
-- [ ] **T2.2** LLM provider interface
-  - Deliverable: abstract `Provider` with concrete `OpenAIProvider` (GPT-4o); structured-output JSON mode.
-  - Accept: integration test calls GPT-4o and parses JSON response with citations.
+- [ ] **T2.2** Pydantic AI agents + output models
+  - Deliverable: three Pydantic AI agents (`summarizer_agent`, `quizzer_agent`, `answerer_agent`) each with a typed output model (`SummaryOutput`, `QuizOutput`, `AnswerOutput | Refusal`); all wired to OpenAI GPT-4o with `retries=1`.
+  - Accept: integration tests call each agent and confirm (a) structured output parses correctly, (b) a deliberately malformed model response triggers a retry, (c) a `Refusal` is returned when the prompt signals out-of-document.
 
-- [ ] **T2.3** Citation validator 🔒
-  - Deliverable: `validate_citations(output, chunks)` enforcing presence + lexical overlap; returns pass/fail + reason.
-  - Accept: unit tests cover (a) valid citation, (b) missing citation, (c) citation pointing to wrong chunk, (d) `NOT_IN_DOCUMENT` pass-through.
+- [ ] **T2.3** Citation lexical verifier 🔒
+  - Deliverable: `verify_citations(output, chunks)` — runs *after* Pydantic AI validates schema; checks each cited chunk ID exists and that key claims have ≥0.6 token-overlap with the cited text; returns pass/fail + reason.
+  - Accept: unit tests cover (a) valid citation with sufficient overlap, (b) citation pointing to wrong chunk, (c) overlap below threshold, (d) `Refusal` input is a no-op pass-through.
 
 - [ ] **T2.4** Summarizer
-  - Deliverable: `generate_chapter_summary(chapter)` producing 150–250 word summary with citations.
-  - Accept: summaries on 5 test chapters validate cleanly and stay within length bounds.
+  - Deliverable: `generate_chapter_summary(chapter)` using `summarizer_agent`; produces 150–250 word `SummaryOutput` with citations; runs lexical verifier before returning.
+  - Accept: summaries on 5 test chapters pass schema validation, pass citation verification, and stay within length bounds.
 
 - [ ] **T2.5** Quiz generator
-  - Deliverable: `generate_quiz(chapter)` producing 5–10 MCQ questions with answers, distractors, explanations, citations.
-  - Accept: every question's citation passes the validator; explanations reference the cited span.
+  - Deliverable: `generate_quiz(chapter)` using `quizzer_agent`; produces 5–10 MCQ `QuizOutput` questions with answers, distractors, explanations, citations; runs lexical verifier before returning.
+  - Accept: every question's citation passes the verifier; explanations reference the cited span.
 
 - [ ] **T2.6** Q&A answerer
-  - Deliverable: `answer_question(document_id, question)` with retrieve → generate → validate flow.
+  - Deliverable: `answer_question(document_id, question)` using `answerer_agent`; retrieve → generate → verify flow; returns `AnswerOutput` with citations or `Refusal`.
   - Accept: on the adversarial test set (≥20 out-of-document questions), refusal rate is **100%** (spec **A3**).
 
 - [ ] **T2.7** Simplifier
